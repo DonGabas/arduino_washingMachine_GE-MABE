@@ -1,12 +1,12 @@
 /**
  * firmware para manejar la tarjeta 189D3632G006 amazonia
  * de la lavadora GE modelo TL1003PB0
- * version 1.0.0
+ * version 1.1.0
  * 
  * por: Gabaniel Guerrero
  */
 /***********************************************************/
-/*                 Tiempo de config                        */
+/*                  Para calibrar                          */
 
 /******** real *****************/
 #define manchasd_lavar 2401                         // ciclos de lavada : 20 min
@@ -27,9 +27,9 @@
 
 #define exp_cicloI 30                               // ciclos menores con powOne y powOne_
 #define exp_cicloII 50                              // ciclos menores con powTwo y powTwo_
-#define exp_cicloIII 75                             // ciclos menores con powThree y powThree_interUp
+#define exp_cicloIII 75                             // ciclos menores con powThree y powThree_
 #define t_drenado 240000UL                          // timepo en que la bomba ya deberia haber vaciado la tina
-#define t_tapa 10000UL                               // tiempo en que deberia haber activado el seguro de la tapa
+#define t_tapa 10000UL                              // tiempo en que deberia haber activado el seguro de la tapa
 
 #define powOne 2000UL                               // motor en ccw encendido para acomodo de la ropa fase 1
 #define powOne_ 5000UL                              // motor en ccw apagado para acomodo de la ropa fase 1
@@ -40,30 +40,31 @@
 
 #define t_irocio 120000UL                           // tiempo para comenzar el rociado en centrifugado
 #define t_rocio 30000UL                             // periodo de rociado en centrifugado
-#define toEnd 120000UL                               // tiempo muerto al culminar
+#define toEnd 125000UL                              // tiempo muerto al culminar
+#define timeLock 120000UL                           // intervalo seguro tapa
 
 /******* para depurar  ******
 #define manchasd_lavar 41
-#define manchasd_enjuagar 31
-#define blancos_lavar  37
-#define blancos_enjuagar 27
-#define color_lavar 35
-#define color_enjuagar 25
-#define cama_lavar 39
-#define cama_enjuagar 29
-#define delicada_lavar 29
-#define delicada_enjuagar 19
+#define manchasd_enjuagar 21
+#define blancos_lavar  27
+#define blancos_enjuagar 17
+#define color_lavar 25
+#define color_enjuagar 17
+#define cama_lavar 29
+#define cama_enjuagar 23
+#define delicada_lavar 21
+#define delicada_enjuagar 15
 #define espress_lavar 23
-#define espress_enjuagar 17
-#define remojo 25
-#define exprimirL 4000UL
-#define exprimirF 6000UL
+#define espress_enjuagar 19
+#define remojo 23
+#define exprimirL 8000UL
+#define exprimirF 12000UL
 
 #define exp_cicloI 8
-#define exp_cicloII 14
-#define exp_cicloIII 17
-#define t_drenado 3000UL
-#define t_tapa 1500UL
+#define exp_cicloII 16
+#define exp_cicloIII 23
+#define t_drenado 6000UL
+#define t_tapa 3000UL
 
 #define powOne 500UL
 #define powOne_ 1000UL
@@ -74,12 +75,11 @@
 
 #define t_irocio 1000UL
 #define t_rocio 500UL
-#define toEnd 3000UL 
+#define toEnd 3000UL
+#define timeLock 2000UL
 */
 /***********************************************************/
 
-#define tunningU 200UL                              // tiempo de encendido del motor en calibracion
-#define tunningD 1000UL                             // tiempo de apagado del motor en calibracion
 #define motorL_up 300UL                             // tiempo de encendido del motor en normal
 #define motorL_down 1700UL                          // tiempo de apagada del motor en normal
 #define motorLF_up 400UL                            // tiempo de encendido del motor en lavado fuerte
@@ -140,6 +140,7 @@ unsigned long e_bomba;                          // evento para el cual deberia h
 unsigned long lockT;                            // evento para el cual deberia haberse activado el seguro de la tapa
 unsigned long interUp;                          // tiempo que estara encendido el motor
 unsigned long interDown;                        // tiempo que estara apagado el motor
+unsigned long tLedTapa;                         // tiempo espera desactiva seguro tapa al apagar bomba
 
 bool alarmStatus;                               // estado de alarma
 bool aguaTop;                                   // estado del presostato
@@ -163,7 +164,8 @@ bool flag_llenado;                              // true: se esta llenando, false
 bool pausa;                                     // estado de pausa definido por el pulsador
 bool istDone;                                   // estado para culminacion de programa de lavado
 bool f_calibrar;                                // estado de motor calibrando
-bool alarm;                                     // para estar seguro de entrar a error 
+bool alarm;                                     // para estar seguro de entrar a error
+bool flag_lock;                                 // bandera del seguro de la tapa
 
 byte selector;                                  // 0: apagado
                                                 // 1: manchas dificiles
@@ -393,10 +395,10 @@ void updateStatus(void) {
         actual = millis();
         if( actual > e_reboteLT ){
             e_reboteLT = actual + antirebote;
+            tLedTapa = actual + timeLock;
             tapaLock = !tapaLock;
-            // actualizar led de seguro de tapa
-            //v_leds[0] = !v_leds[0];
-            update_leds();
+            if (!tapaLock) flag_lock = true;
+            else update_leds();
                 
         }
     }
@@ -426,6 +428,7 @@ void leds_alarm(){
 }
 // actualiza el estado de los leds
 void update_leds(){
+    unsigned long actual = millis();
     for (byte i = 1; i < 5; i++)
         v_leds[i] = v_fcopia[i-1];
     digitalWrite(pinLedExprimir,!v_leds[4]);
@@ -433,7 +436,8 @@ void update_leds(){
     digitalWrite(pinLedLavar,!v_leds[2]);
     digitalWrite(pinLedRemojo,!v_leds[1]);
     if ( tapaLock ) digitalWrite(pinLedTapa,LOW);
-    else digitalWrite(pinLedTapa,HIGH);
+    else if( actual > tLedTapa ) 
+        digitalWrite(pinLedTapa,HIGH);
 }
 // alternar estados de todos los leds
 void toggleLEDS(){
@@ -477,10 +481,14 @@ void toggleLedsPausa(){
 }
 // alternar estado del led k
 void toggleOneLed(byte k){
+    unsigned long actual = millis();
     digitalWrite(pinLedExprimir,!v_leds[4]);
     digitalWrite(pinLedEnjuagar,!v_leds[3]);
     digitalWrite(pinLedLavar,!v_leds[2]);
     digitalWrite(pinLedRemojo,!v_leds[1]);
+    if ( tapaLock ) v_leds[0] = 1;
+    else if( actual > tLedTapa )
+        v_leds[0] = 0;
     digitalWrite(pinLedTapa,!v_leds[0]);
     v_leds[k] = !v_leds[k];
 }
@@ -572,7 +580,9 @@ void extra() {
 void chacachaca(unsigned int c_max,bool rem,byte k,byte tipo){
     if (!flag_llenado){
         unsigned long actual = millis();
-        if ( !aguaDone ) alarmStatus = 1;
+        if ( !aguaDone ){
+            alarmStatus = 1;
+        }
         if ( c_ciclos < c_max ){
             /****************************************************************************************/
             /* t0-------t1-------t2-------t3-------t4-------t5-------t6-------t7-------t8-------t9-------t10...
@@ -667,12 +677,11 @@ void chacachaca(unsigned int c_max,bool rem,byte k,byte tipo){
                 v_fcopia[k] = 0;
                 c_ciclos = 0;
                 update_leds();
-                aguaDone = false;
+                if (rem == 0) aguaDone = false;
                 cw = true;
                 ccw = true;
                 chcchc = false;
             }
-            
         }
     }
 }
@@ -702,6 +711,12 @@ void toggleCCW(){
 void llenado(void) {
     /*      Configurada para siempre usar agua fria     */
     unsigned long actual = millis();
+    if (flag_lock){
+        if( actual > tLedTapa ){
+            update_leds();
+            flag_lock = false;
+        }
+    }
     if (!aguaTop){// presostato abierto - por llenar
         if ( chcchc ){// No deberia estar en este punto en pleno lavado 
             alarmStatus = 1;
@@ -737,7 +752,9 @@ void exprimir(unsigned long tiempo,byte k){
             lockT = actual + t_tapa;
         }
         if( actual > lockT ){
-            if ( !tapaLock ) alarmStatus = 1;
+            if ( !tapaLock ){
+                alarmStatus = 1;
+            }
             else digitalWrite(pinLedTapa,LOW);
         }
         if (!aguaTop){// esperar que drene el agua
@@ -777,14 +794,16 @@ void exprimir(unsigned long tiempo,byte k){
                     
                 }
             }
-        }else if( actual > e_bomba ) alarmStatus = 1;
+        }else{
+            if( actual > e_bomba ){
+                alarmStatus = 1;
+            }
+        }
     }else{
         if (actual < e_e_cwF){
             if ( c_exp == (exp_cicloIII+1) ){
                 digitalWrite(pinMotorCW, HIGH);
-                //e_ch_ccw = actual + t_irocio;                 // uso e_ch_ccw para tarea de rociado
                 c_exp++;
-                
             }
             if (c_roc < 4){// rociado, 2 veces
                 if( actual > e_ch_ccw ){
@@ -792,7 +811,6 @@ void exprimir(unsigned long tiempo,byte k){
                     ccw = !ccw;
                     e_ch_ccw += t_rocio;
                     c_roc++;
-                    
                 }
             }
             
@@ -815,7 +833,6 @@ void exprimir(unsigned long tiempo,byte k){
                 c_roc = 5;
                 update_leds();
             }
-            
         }
     }
 }
@@ -825,8 +842,12 @@ void endWait(){
     if ( istDone ){
         istDone = false;
         endWork = actual + toEnd;
-        tapaLock = 1;
-        
+    }
+    if (flag_lock){
+        if( actual > tLedTapa ){
+            update_leds();
+            flag_lock = false;
+        }
     }
     if( actual > endWork ){
         reset();
@@ -856,7 +877,6 @@ void reset(){
     flag_exp = false;
     flag_bomba = false;
     est = 0;
-    aguaTop = 0;
     tapaLock = 0;
     v_leds[0] = 0;
     aguaDone = 0;
@@ -867,6 +887,9 @@ void reset(){
     temperatura = 1;
     lastTemp = 1;
     alarm = false;
+    flag_lock = false;
+    aguaTop = digitalRead(pinPresostato);
+    if ( aguaTop )  aguaDone = 1;
     
     e_ch_cw = millis();
     blink = millis();
@@ -888,10 +911,11 @@ void reset(){
     digitalWrite(pinLedLavar, HIGH);
     digitalWrite(pinLedEnjuagar, HIGH);
     digitalWrite(pinLedExprimir, HIGH);
-    
 }
 // arduino startup
 void setup() {
+    
+    //Serial.begin(9600);
     
     funcionC = 0;
     selWork = 0;
@@ -914,7 +938,7 @@ void setup() {
     
     //Configura la interrupción en el PIN del pulsador Inincio-Pausa en modo FALLING
     attachInterrupt(digitalPinToInterrupt(pinInicioPausa), inicioPausa, FALLING);
-
+    //genesis = millis();
 }
 // arduino loop de eventos
 void loop() {
